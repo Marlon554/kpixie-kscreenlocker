@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔒 Pixie KDE Lock
+# 🔒 K Pixie Lock
 
 **A clean, modern, and minimal kscreenlocker theme inspired by Google Pixel UI and Material Design 3.**
 

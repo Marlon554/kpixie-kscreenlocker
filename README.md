@@ -32,7 +32,7 @@
 
 ## ✨ Features
 
-- 📱 **Pixel Aesthetic:** Clean typography and a iconic two-tone stacked clock.
+- 📱 **Pixel Aesthetic:** Clean typography and a unique two-tone stacked clock.
 - 🎨 **Material You Dynamic Colors:** Intelligent color extraction that samples your wallpaper for UI accents.
 - 🌫️ **Next-Gen Blur:** High-performance Gaussian blur.
 - 👤 **Circular Avatar:** Canvas-rendered crisp profile picture.

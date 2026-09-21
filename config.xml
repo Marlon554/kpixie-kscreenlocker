@@ -6,17 +6,12 @@
   <kcfgfile name=""/>
 
   <group name="General">
-    <!-- TODO Plasma 7: Make this an enum. -->
-    <entry name="alwaysShowClock" type="Bool">
-      <label>Show a clock.</label>
+    <entry name="use24HourClock" type="Bool">
+      <label>Show the clock in 24-hour format instead of 12-hour with AM/PM.</label>
       <default>true</default>
     </entry>
-    <entry name="hideClockWhenIdle" type="Bool">
-      <label>Hide clock when prompt is hidden.</label>
-      <default>false</default>
-    </entry>
-    <entry name="showMediaControls" type="Bool">
-      <label>If true, shows any currently playing media along with controls to pause it.</label>
+    <entry name="autoAccentColor" type="Bool">
+      <label>Automatically pick the clock and unlock button color from the wallpaper, Material-You style, instead of the Plasma accent color.</label>
       <default>true</default>
     </entry>
   </group>

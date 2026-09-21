@@ -1,8 +1,6 @@
 /*
  * Pixie Lockscreen — LockScreenUi
- * Visual design adapted from Pixie SDDM by xCaptaiN09
- * https://github.com/xCaptaiN09/pixie-sddm (MIT License)
- *
+ * Visual design: Pixie SDDM by xCaptaiN09 (MIT)
  * Base: Plasma kscreenlocker (GPL-2.0-or-later)
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
@@ -11,6 +9,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 
 import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.workspace.components as PW
@@ -27,53 +26,39 @@ import "components"
 Item {
     id: lockScreenUi
 
-    // ── Accent colors derived from Plasma's highlight color ────────────────
-    // The same updateColors() logic from Pixie's Clock.qml, applied to
-    // Kirigami.Theme.highlightColor instead of the extracted wallpaper color.
-    //
-    // accentHours   — vibrant tone (sat×1.3, val 0.95) + 15 % white tint.
-    //                 Used for: hours digits, date label, PowerBar icons.
-    // accentMinutes — soft/pastel tone (sat×0.75, val 0.92) + 40 % white tint.
-    //                 Used for: minutes digits only.
-    readonly property color _h: Kirigami.Theme.highlightColor
+    // ── Pixie palette (literal values from pixie-sddm/theme.conf) ───────────
+    readonly property color baseColor: "#1A1C18"
+    readonly property color surfaceColor: Qt.lighter(baseColor, 1.30)
+    readonly property color surfaceVariantColor: Qt.lighter(baseColor, 1.60)
+    readonly property color textColor: "#E3E3DC"
 
-    readonly property color accentHours: {
-        var h = _h;
-        var v;
-        if (h.hsvValue < 0.3) {
-            v = Qt.hsva(h.hsvHue, 0.6, 0.90, 1.0);
-        } else if (h.hsvValue > 0.8 && h.hsvSaturation < 0.2) {
-            v = Qt.hsva(h.hsvHue, 0.80, 0.70, 1.0);
-        } else {
-            v = Qt.hsva(h.hsvHue, Math.min(1.0, h.hsvSaturation * 1.3), 0.95, 1.0);
-        }
-        return Qt.tint(v, Qt.rgba(1, 1, 1, 0.15));
+    // Accent: extracted from the wallpaper when enabled, else the Plasma theme color.
+    property color themeAccent: Kirigami.Theme.highlightColor
+    readonly property color accent: config.autoAccentColor
+                                     ? accentExtractor.extractedColor
+                                     : themeAccent
+
+    // Chrome (date/PowerBar/clock) stays hidden until the accent is ready,
+    // so it never flashes the fallback color first.
+    readonly property bool uiReady: !config.autoAccentColor || accentExtractor.processed
+
+    PixieAccentExtractor {
+        id: accentExtractor
+        fallbackColor: lockScreenUi.themeAccent
+        source: config.autoAccentColor ? wallpaper : null
     }
-
-    readonly property color accentMinutes: {
-        var h = _h;
-        var v;
-        if (h.hsvValue < 0.3) {
-            v = Qt.hsva(h.hsvHue, 0.35, 0.85, 1.0);
-        } else if (h.hsvValue > 0.8 && h.hsvSaturation < 0.2) {
-            v = Qt.hsva(h.hsvHue, 0.50, 0.75, 1.0);
-        } else {
-            v = Qt.hsva(h.hsvHue, Math.min(1.0, h.hsvSaturation * 0.75), 0.92, 1.0);
-        }
-        return Qt.tint(v, Qt.rgba(1, 1, 1, 0.40));
-    }
-
-    // accentHours is used everywhere outside the clock (date, PowerBar, card)
-    readonly property color accent: accentHours
 
     property alias sessionManagement: sessionManagement
     property alias pixieFontMedium:   pixieFontMedium
     property alias pixieFontRegular:  pixieFontRegular
     property alias pixieFontBold:     pixieFontBold
+    property alias pixieFontIcons:    pixieFontIcons
 
     FontLoader { id: pixieFontRegular; source: "assets/fonts/FlexRounded-R.ttf" }
     FontLoader { id: pixieFontMedium;  source: "assets/fonts/FlexRounded-M.ttf" }
     FontLoader { id: pixieFontBold;    source: "assets/fonts/FlexRounded-B.ttf" }
+    // Needed for PowerBar glyphs (battery/charging/suspend icons).
+    FontLoader { id: pixieFontIcons;   source: "assets/fonts/MaterialDesignIcons.ttf" }
 
     function handleMessage(msg) {
         if (!root.notification) {
@@ -116,11 +101,18 @@ Item {
     }
 
     SessionManagement { id: sessionManagement }
-    KeyboardIndicator.KeyState { id: capsLockState; key: Qt.Key_CapsLock }
+    KeyboardIndicator.KeyState { id: numLockState; key: Qt.Key_NumLock }
 
     Connections {
         target: sessionManagement
-        function onAboutToSuspend() { root.clearPassword(); }
+        // Also hide the login card: if it was left open, a spurious key
+        // event on resume could otherwise land on an already-focused,
+        // empty password field and auto-submit a blank password — which
+        // counts as a failed attempt and triggers escalating lockout delays.
+        function onAboutToSuspend() {
+            root.clearPassword();
+            lockScreenRoot.uiVisible = false;
+        }
     }
 
     RejectPasswordAnimation { id: rejectPasswordAnimation; target: mainBlock }
@@ -144,7 +136,6 @@ Item {
         id: lockScreenRoot
 
         property bool uiVisible: false
-        property bool seenPositionChange: false
         property bool blockUI: containsMouse
                                && (mainStack.depth > 1
                                    || mainBlock.mainPasswordBox.text.length > 0
@@ -152,11 +143,12 @@ Item {
 
         anchors.fill: parent
         hoverEnabled: true
+        focus: true
         cursorShape: uiVisible ? Qt.ArrowCursor : Qt.BlankCursor
         drag.filterChildren: true
 
-        onPressed:         uiVisible = true
-        onPositionChanged: { uiVisible = seenPositionChange; seenPositionChange = true; }
+        // Card only reveals on click or key press, never on mouse movement.
+        onPressed: uiVisible = true
         onUiVisibleChanged: {
             if (uiVisible) Window.window.requestActivate();
             if (blockUI)        fadeoutTimer.running = false;
@@ -169,14 +161,21 @@ Item {
         }
         onExited: uiVisible = false
 
-        Keys.onEscapePressed: {
-            if (uiVisible) {
+        // Any key reveals the card when hidden; Esc hides it again when visible.
+        Keys.onPressed: event => {
+            if (!uiVisible) {
+                uiVisible = true;
+                mainBlock.mainPasswordBox.forceActiveFocus();
+                event.accepted = true;
+                return;
+            }
+            if (event.key === Qt.Key_Escape) {
                 uiVisible = false;
                 if (inputPanel.keyboardActive) inputPanel.showHide();
                 root.clearPassword();
+                event.accepted = true;
             }
         }
-        Keys.onPressed: event => { uiVisible = true; event.accepted = false; }
 
         Timer {
             id: fadeoutTimer; interval: 10000
@@ -192,26 +191,24 @@ Item {
             id: launchAnimation; target: lockScreenRoot; property: "opacity"
             from: 0; to: 1; duration: Kirigami.Units.veryLongDuration * 2
         }
-        Component.onCompleted: launchAnimation.start()
+        Component.onCompleted: {
+            launchAnimation.start();
+            forceActiveFocus();
+        }
 
-        // ── Wallpaper + blur ───────────────────────────────────────────────
-        WallpaperFader {
+        // Wallpaper blur: sharp at idle, blurs in once the login card opens.
+        MultiEffect {
+            id: backgroundBlur
             anchors.fill: parent
-            state: lockScreenRoot.uiVisible ? "on" : "off"
             source: wallpaper
-            mainStack: mainStack
-            clock:  stubClock
-            footer: stubFooter
-            alwaysShowClock: false
+            blurEnabled: true
+            blur: lockScreenRoot.uiVisible ? 1.0 : 0.0
+            opacity: lockScreenRoot.uiVisible ? 1.0 : 0.0
+            autoPaddingEnabled: false
+
+            Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.InOutQuad } }
+            Behavior on blur { NumberAnimation { duration: 400; easing.type: Easing.InOutQuad } }
         }
-        // Stubs satisfy WallpaperFader's required properties without
-        // redeclaring the FINAL opacity property of QQuickItem.
-        Item {
-            id: stubClock
-            visible: false; width: 0; height: 0
-            property Item shadow: Item { visible: false; width: 0; height: 0 }
-        }
-        Item { id: stubFooter; visible: false; width: 0; height: 0 }
 
         // Dark overlay — idle: 0.4, login: 0.6 (Pixie Main.qml values)
         Rectangle {
@@ -229,26 +226,30 @@ Item {
             anchors { top: parent.top; left: parent.left; right: parent.right }
             height: 80
 
-            // Date — accentHours color, topMargin:50 leftMargin:60 (Pixie values)
+            // Date label (Pixie layout values)
             Text {
                 id: dateLabel
                 anchors { top: parent.top; left: parent.left; topMargin: 50; leftMargin: 60 }
                 text: Qt.formatDateTime(new Date(), "dddd, MMMM d")
-                color: lockScreenUi.accentHours
+                color: lockScreenUi.accent
                 font.pixelSize: 22
-                font.family: pixieFontMedium.name
-                opacity: 0.9
+                font.family: pixieFontRegular.name
+                opacity: lockScreenUi.uiReady ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 300 } }
                 Timer {
                     interval: 60000; running: true; repeat: true
                     onTriggered: dateLabel.text = Qt.formatDateTime(new Date(), "dddd, MMMM d")
                 }
             }
 
-            // PowerBar — accentHours color, topMargin:30 rightMargin:40 spacing:20
+            // PowerBar (Pixie layout values)
             Row {
+                id: powerBarRow
                 anchors { top: parent.top; right: parent.right; topMargin: 30; rightMargin: 40 }
                 spacing: 20
                 height: 30
+                opacity: lockScreenUi.uiReady ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 300 } }
 
                 // Battery — hidden on desktops without a battery
                 Row {
@@ -260,17 +261,16 @@ Item {
 
                     Text {
                         text: batteryControl.percent + "%"
-                        color: lockScreenUi.accentHours
+                        color: lockScreenUi.accent
                         font.pixelSize: 14
-                        font.family: pixieFontMedium.name
                         font.weight: Font.Medium
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Text {
                         text: batteryControl.pluggedIn ? "󱐋" : "󰁹"
-                        color: lockScreenUi.accentHours
+                        color: lockScreenUi.accent
                         font.pixelSize: 18
-                        font.family: pixieFontMedium.name
+                        font.family: pixieFontIcons.name
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -289,9 +289,8 @@ Item {
                         anchors.centerIn: parent
                         text: keyboardLayoutSwitcher.layoutNames.shortName
                               || keyboardLayoutSwitcher.layoutNames.longName || "??"
-                        color: lockScreenUi.accentHours
+                        color: lockScreenUi.accent
                         font.pixelSize: 14
-                        font.family: pixieFontMedium.name
                         font.capitalization: Font.AllUppercase
                     }
                     MouseArea {
@@ -301,12 +300,13 @@ Item {
                     }
                 }
 
-                // Virtual keyboard toggle
+                // Virtual keyboard toggle — no Pixie equivalent (SDDM greeters
+                // don't need one); styled to match the PowerBar icons it sits beside.
                 Text {
                     text: inputPanel.keyboardActive ? "󰌐" : "󰌌"
-                    color: lockScreenUi.accentHours
+                    color: lockScreenUi.accent
                     font.pixelSize: 20
-                    font.family: pixieFontMedium.name
+                    font.family: pixieFontIcons.name
                     anchors.verticalCenter: parent.verticalCenter
                     visible: inputPanel.status === Loader.Ready
                     MouseArea {
@@ -322,9 +322,9 @@ Item {
                 // Suspend — 󰤄 (Pixie PowerBar icon)
                 Text {
                     text: "󰤄"
-                    color: lockScreenUi.accentHours
+                    color: lockScreenUi.accent
                     font.pixelSize: 20
-                    font.family: pixieFontMedium.name
+                    font.family: pixieFontIcons.name
                     anchors.verticalCenter: parent.verticalCenter
                     MouseArea {
                         id: suspendArea
@@ -350,9 +350,28 @@ Item {
             }
             PixieClock {
                 id: pixieClock
-                hoursColor:   lockScreenUi.accentHours
-                minutesColor: lockScreenUi.accentMinutes
+                baseAccent:   lockScreenUi.accent
                 fontFamily:   pixieFontMedium.name
+                opacity: lockScreenUi.uiReady ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 300 } }
+            }
+        }
+
+        // ── "Press any key to unlock" hint — restored from Pixie SDDM ───────
+        Text {
+            z: 5
+            text: i18ndc("plasma_shell_org.kde.plasma.desktop", "@info:status",
+                         "Press any key to unlock")
+            color: lockScreenUi.textColor
+            font.pixelSize: 16
+            anchors {
+                bottom: parent.bottom
+                horizontalCenter: parent.horizontalCenter
+                bottomMargin: 100
+            }
+            opacity: lockScreenRoot.uiVisible ? 0 : 0.5
+            Behavior on opacity {
+                NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
             }
         }
 
@@ -369,7 +388,15 @@ Item {
                 lockScreenUiVisible: lockScreenRoot.uiVisible
                 enabled: !graceLockTimer.running
                 userListModel: users
-                capsLockOn: capsLockState.locked
+                numLockOn: numLockState.locked
+                accent: lockScreenUi.accent
+                pixieFont: lockScreenUi.pixieFontRegular.name
+                pixieFontBold: lockScreenUi.pixieFontBold.name
+                baseColor: lockScreenUi.baseColor
+                surfaceColor: lockScreenUi.surfaceColor
+                surfaceVariantColor: lockScreenUi.surfaceVariantColor
+                textColor: lockScreenUi.textColor
+                sessionManagement: lockScreenUi.sessionManagement
 
                 StackView.onStatusChanged: {
                     if (StackView.status === StackView.Activating) {

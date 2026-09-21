@@ -1,12 +1,7 @@
 /*
  * Pixie Lockscreen — PixieClock
- * Clock design and color logic adapted from Pixie SDDM by xCaptaiN09
- * https://github.com/xCaptaiN09/pixie-sddm (MIT License)
- *
- * Two-tone stacked clock: hours and minutes share the same digit columns,
- * offset vertically so they interleave. Colors come from LockScreenUi:
- *   hoursColor   — Plasma accent (raw highlightColor)
- *   minutesColor — accent tinted 40 % toward white via Qt.tint()
+ * Color transform ported from Pixie SDDM's components/Clock.qml; baseAccent
+ * comes from this lockscreen's PixieAccentExtractor.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -15,19 +10,57 @@ import QtQuick
 Item {
     id: clock
 
-    // Colors set by LockScreenUi — no internal derivation needed
-    property color  hoursColor:   "#A9C78F"
-    property color  minutesColor: "#D4E4BC"
-    property string fontFamily:   ""
+    property string fontFamily: "FlexRounded"
+    property color baseAccent: "#AED68A"
+    property color smartHoursColor: "#AED68A"
+    property color smartMinutesColor: "#D4E4BC"
+    property string timeStr: ""
 
-    property string timeStr: Qt.formatTime(new Date(), "HHmm")
+    function updateTime() {
+        const date = new Date();
+        let hours = date.getHours();
+        const minutes = date.getMinutes();
 
-    Timer {
-        interval: 1000; running: true; repeat: true
-        onTriggered: clock.timeStr = Qt.formatTime(new Date(), "HHmm")
+        // Preserve the lockscreen's 24-hour setting.
+        if (!config.use24HourClock) {
+            hours = hours % 12;
+            if (hours === 0) hours = 12;
+        }
+
+        const hStr = hours < 10 ? "0" + hours : "" + hours;
+        const mStr = minutes < 10 ? "0" + minutes : "" + minutes;
+        clock.timeStr = hStr + mStr;
     }
 
-    implicitWidth:  digitRow.implicitWidth
+    // EXACT Pixie SDDM Clock.qml color transform.
+    function updateColors() {
+        const base = clock.baseAccent;
+
+        if (base.hsvSaturation < 0.15) {
+            clock.smartHoursColor = Qt.lighter(base, 1.3);
+            clock.smartMinutesColor = Qt.darker(base, 1.4);
+            return;
+        }
+        if (base.hsvValue < 0.5) {
+            clock.smartHoursColor = Qt.hsva(base.hsvHue, 0.7, 0.9, 1.0);
+            clock.smartMinutesColor = Qt.hsva(base.hsvHue, 0.45, 0.85, 1.0);
+        } else if (base.hsvValue > 0.8 && base.hsvSaturation < 0.2) {
+            clock.smartHoursColor = Qt.hsva(base.hsvHue, 0.8, 0.7, 1.0);
+            clock.smartMinutesColor = Qt.hsva(base.hsvHue, 0.5, 0.75, 1.0);
+        } else {
+            clock.smartHoursColor = Qt.hsva(base.hsvHue, Math.min(1.0, base.hsvSaturation * 1.3), 0.95, 1.0);
+            clock.smartMinutesColor = Qt.hsva(base.hsvHue, Math.min(1.0, base.hsvSaturation * 0.75), 0.92, 1.0);
+        }
+    }
+
+    onBaseAccentChanged: updateColors()
+
+    Component.onCompleted: {
+        updateColors();
+        updateTime();
+    }
+
+    implicitWidth: digitRow.implicitWidth
     implicitHeight: digitRow.implicitHeight
 
     Row {
@@ -35,42 +68,59 @@ Item {
         anchors.centerIn: parent
         spacing: 0
 
-        // Column 1 — tens digit of hours (top) and tens digit of minutes (bottom)
         Column {
             spacing: -130
             Text {
                 text: clock.timeStr.charAt(0)
-                color: clock.hoursColor
-                font { pixelSize: 200; family: clock.fontFamily; weight: Font.Medium }
-                width: 130; horizontalAlignment: Text.AlignHCenter
+                color: clock.smartHoursColor
+                font.pixelSize: 200
+                font.family: clock.fontFamily
+                font.weight: Font.Medium
+                width: 130
+                horizontalAlignment: Text.AlignHCenter
                 antialiasing: true
             }
             Text {
                 text: clock.timeStr.charAt(2)
-                color: clock.minutesColor
-                font { pixelSize: 200; family: clock.fontFamily; weight: Font.Medium }
-                width: 130; horizontalAlignment: Text.AlignHCenter
+                color: clock.smartMinutesColor
+                font.pixelSize: 200
+                font.family: clock.fontFamily
+                font.weight: Font.Medium
+                width: 130
+                horizontalAlignment: Text.AlignHCenter
                 antialiasing: true
             }
         }
 
-        // Column 2 — ones digit of hours (top) and ones digit of minutes (bottom)
         Column {
             spacing: -130
             Text {
                 text: clock.timeStr.charAt(1)
-                color: clock.hoursColor
-                font { pixelSize: 200; family: clock.fontFamily; weight: Font.Medium }
-                width: 130; horizontalAlignment: Text.AlignHCenter
+                color: clock.smartHoursColor
+                font.pixelSize: 200
+                font.family: clock.fontFamily
+                font.weight: Font.Medium
+                width: 130
+                horizontalAlignment: Text.AlignHCenter
                 antialiasing: true
             }
             Text {
                 text: clock.timeStr.charAt(3)
-                color: clock.minutesColor
-                font { pixelSize: 200; family: clock.fontFamily; weight: Font.Medium }
-                width: 130; horizontalAlignment: Text.AlignHCenter
+                color: clock.smartMinutesColor
+                font.pixelSize: 200
+                font.family: clock.fontFamily
+                font.weight: Font.Medium
+                width: 130
+                horizontalAlignment: Text.AlignHCenter
                 antialiasing: true
             }
         }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: updateTime()
     }
 }

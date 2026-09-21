@@ -1,13 +1,10 @@
 /*
  * Pixie Lockscreen — MainBlock
- * Visual design adapted from Pixie SDDM by xCaptaiN09
- * https://github.com/xCaptaiN09/pixie-sddm (MIT License)
- *
+ * Visual design: Pixie SDDM by xCaptaiN09 (MIT)
  * Base: Plasma kscreenlocker (GPL-2.0-or-later)
  *
- * Does NOT inherit SessionManagementScreen to avoid duplicate rendering of
- * avatar / username / actionItems that the parent auto-generates.
- * Implements the minimum API expected by LockScreenUi and VirtualKeyboardLoader.
+ * Standalone login card (not a SessionManagementScreen subclass) that still
+ * exposes the API LockScreenUi and VirtualKeyboardLoader expect.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -31,7 +28,7 @@ Item {
     property string notificationMessage: ""
     property var    userListModel:        null
     property bool   showUserList:         false
-    property bool   capsLockOn:           false
+    property bool   numLockOn:             false
     property bool   isLoggingIn:          false
     property list<Item> actionItems
 
@@ -43,7 +40,7 @@ Item {
 
     function playHighlightAnimation() { _highlightAnim.start(); }
     function startLogin() {
-        if (isLoggingIn) return;
+        if (isLoggingIn || passwordField.text.length === 0) return;
         isLoggingIn = true;
         passwordResult(passwordField.text);
     }
@@ -58,24 +55,15 @@ Item {
         function onClearPassword() { mainBlock.isLoggingIn = false; }
     }
 
-    // Accent and font resolved by walking up the parent chain to LockScreenUi
-    property color  accent:    _resolve("accent",               "#A9C78F")
-    property string pixieFont: _resolve("pixieFontMedium.name", "")
-
-    function _resolve(path, fallback) {
-        var keys = path.split(".");
-        var node = parent;
-        while (node) {
-            var val = node; var ok = true;
-            for (var i = 0; i < keys.length; i++) {
-                if (typeof val[keys[i]] !== "undefined") val = val[keys[i]];
-                else { ok = false; break; }
-            }
-            if (ok && val !== node) return val;
-            node = node.parent;
-        }
-        return fallback;
-    }
+    // Visual dependencies are supplied explicitly by LockScreenUi.
+    property color  accent:              "#A9C78F"
+    property string pixieFont:           ""
+    property string pixieFontBold:       ""
+    property color  baseColor:            "#1A1C18"
+    property color  surfaceColor:         "#22241F"
+    property color  surfaceVariantColor:  "#2A2D26"
+    property color  textColor:            "#E3E3DC"
+    property var    sessionManagement:    null
 
     property string userName: (userListModel && userListModel.count > 0)
                               ? (userListModel.get(0).realName || userListModel.get(0).name) : ""
@@ -88,32 +76,43 @@ Item {
         PropertyAnimation { target: cardVisual; property: "opacity"; to: 0.7; duration: 80 }
     }
 
-    // ── Login card — width:380 height:480 opacity:0.7 radius:32 color:#1A1C18
+    // Login card. Explicit x/y (not anchors.centerIn) so it can grow/bounce
+    // when the Num Lock hint appears.
     Rectangle {
         id: cardVisual
-        width: 380; height: 480
-        anchors.centerIn: parent
+        width: 380
+        height: 430 + (numLockLabel.visible ? 40 : 0)
+        x: (parent.width - width) / 2
+        y: (parent.height - 430) / 2
 
         property bool isError: false
-        color:   isError ? "#442222" : "#1A1C18"
+        color:   isError ? "#442222" : mainBlock.baseColor
         radius:  32
         opacity: mainBlock.lockScreenUiVisible ? 0.7 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } }
+        Behavior on opacity { NumberAnimation { duration: 400 } }
         Behavior on color   { ColorAnimation  { duration: 200 } }
+        Behavior on height  { NumberAnimation { duration: 300; easing.type: Easing.InOutQuad } }
+        Behavior on y       { NumberAnimation { duration: 300; easing.type: Easing.OutBack } }
 
         SequentialAnimation {
             id: shakeAnimation; loops: 2
             PropertyAnimation {
-                target: cardVisual; property: "anchors.horizontalCenterOffset"
-                from: 0; to: -10; duration: 50; easing.type: Easing.InOutQuad
+                target: cardVisual; property: "x"
+                from: (mainBlock.width - cardVisual.width) / 2
+                to:   (mainBlock.width - cardVisual.width) / 2 - 10
+                duration: 50; easing.type: Easing.InOutQuad
             }
             PropertyAnimation {
-                target: cardVisual; property: "anchors.horizontalCenterOffset"
-                from: -10; to: 10; duration: 50; easing.type: Easing.InOutQuad
+                target: cardVisual; property: "x"
+                from: (mainBlock.width - cardVisual.width) / 2 - 10
+                to:   (mainBlock.width - cardVisual.width) / 2 + 10
+                duration: 50; easing.type: Easing.InOutQuad
             }
             PropertyAnimation {
-                target: cardVisual; property: "anchors.horizontalCenterOffset"
-                from: 10; to: 0; duration: 50; easing.type: Easing.InOutQuad
+                target: cardVisual; property: "x"
+                from: (mainBlock.width - cardVisual.width) / 2 + 10
+                to:   (mainBlock.width - cardVisual.width) / 2
+                duration: 50; easing.type: Easing.InOutQuad
             }
             onStopped: cardVisual.isError = false
         }
@@ -137,13 +136,13 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
 
                 Rectangle {
-                    anchors.fill: parent; color: "#2D2F27"; radius: width / 2
+                    anchors.fill: parent; color: mainBlock.surfaceColor; radius: width / 2
                     visible: avatarImage.status !== Image.Ready
                     Text {
                         anchors.centerIn: parent
                         text: mainBlock.userName.charAt(0).toUpperCase() || "?"
                         color: mainBlock.accent
-                        font.pixelSize: 48; font.family: mainBlock.pixieFont; font.weight: Font.Bold
+                        font.pixelSize: 48; font.family: mainBlock.pixieFontBold; font.weight: Font.Bold
                     }
                 }
 
@@ -169,141 +168,127 @@ Item {
                 }
             }
 
-            // ── Username ───────────────────────────────────────────────────
-            Text {
-                Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 10
-                text: mainBlock.userName
-                      || i18ndc("plasma_shell_org.kde.plasma.desktop", "@label", "User")
-                color: "white"; font.pixelSize: 24; font.weight: Font.Bold
-                font.family: mainBlock.pixieFont
-            }
-
-            // ── Switch User pill — mirrors Pixie sessionPill exactly ────────
+            // ── Username / Switch User ───────────────────────────────────────
+            // The username itself is the click target; a small chevron hints
+            // it's clickable instead of a separate "Switch User" button.
             Item {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: switchPill.width; Layout.preferredHeight: switchPill.height
-                visible: {
-                    var p = mainBlock.parent;
-                    while (p) {
-                        if (typeof p.sessionManagement !== "undefined")
-                            return p.sessionManagement.canSwitchUser;
-                        p = p.parent;
-                    }
-                    return false;
-                }
+                Layout.preferredWidth: userNameRow.implicitWidth + 40
+                Layout.preferredHeight: userNameRow.implicitHeight + 20
+                Layout.topMargin: 10
+                visible: mainBlock.userName !== ""
+
                 Rectangle {
-                    id: switchPill
+                    anchors.fill: parent
+                    color: "white"
+                    opacity: userClickArea.pressed ? 0.2 : 0
+                    radius: 12
+                    Behavior on opacity { NumberAnimation { duration: 100 } }
+                }
+
+                Row {
+                    id: userNameRow
                     anchors.centerIn: parent
-                    width: 180; height: 36; radius: 18
-                    color:        switchArea.containsPress ? "#3D3F37" : "#2D2F27"
-                    border.width: 1
-                    border.color: switchArea.containsPress ? mainBlock.accent : "#3D3F37"
-                    scale: switchArea.containsPress ? 0.95 : 1.0
-                    Behavior on scale        { NumberAnimation { duration: 100 } }
-                    Behavior on color        { ColorAnimation  { duration: 100 } }
-                    Behavior on border.color { ColorAnimation  { duration: 100 } }
-                    RowLayout {
-                        anchors.centerIn: parent; spacing: 8
-                        Text { text: "󰯄"; color: mainBlock.accent; font.pixelSize: 16; font.family: mainBlock.pixieFont }
-                        Text {
-                            text: i18ndc("plasma_shell_org.kde.plasma.desktop", "@action:button", "Switch User")
-                            color: "white"; font.pixelSize: 13; font.weight: Font.Medium; font.family: mainBlock.pixieFont
-                        }
+                    spacing: 4
+
+                    Text {
+                        id: userNameLabel
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: mainBlock.userName
+                              || i18ndc("plasma_shell_org.kde.plasma.desktop", "@label", "User")
+                        color: "white"
+                        font.pixelSize: 24
+                        font.weight: Font.Bold
+                        font.family: mainBlock.pixieFont
                     }
-                    MouseArea {
-                        id: switchArea; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            var p = mainBlock.parent;
-                            while (p) {
-                                if (typeof p.sessionManagement !== "undefined") { p.sessionManagement.switchUser(); return; }
-                                p = p.parent;
-                            }
-                        }
+
+                    // Switch-user chevron.
+                    Text {
+                        id: switchIndicator
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "▾"
+                        visible: mainBlock.sessionManagement !== null
+                                 && mainBlock.sessionManagement.canSwitchUser
+                        color: "white"
+                        font.pixelSize: 12
                     }
+                }
+
+                MouseArea {
+                    id: userClickArea
+                    anchors.fill: parent
+                    enabled: mainBlock.sessionManagement !== null
+                             && mainBlock.sessionManagement.canSwitchUser
+                    hoverEnabled: true
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: mainBlock.sessionManagement.switchUser()
+                }
+
+                scale: userClickArea.pressed ? 0.95 : 1.0
+                Behavior on scale { NumberAnimation { duration: 100 } }
+            }
+
+            // ── Password field ────────────────────────────────────────────
+            TextField {
+                id: passwordField
+                Layout.topMargin: 14
+                echoMode: TextInput.Password
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: 18
+                color: "white"
+                focus: true
+                enabled: !authenticator.graceLocked && !mainBlock.isLoggingIn
+                placeholderText: ""
+
+                background: Rectangle {
+                    color: mainBlock.surfaceColor
+                    radius: 16
+                    border.width: passwordField.activeFocus ? 2 : 0
+                    border.color: mainBlock.accent
+                    opacity: passwordField.enabled ? 1.0 : 0.5
+                }
+
+                Text {
+                    text: i18ndc("plasma_shell_org.kde.plasma.desktop",
+                                 "@info:placeholder in text field", "Enter Password")
+                    color: "gray"
+                    font.pixelSize: 16
+                    visible: !parent.text
+                    anchors.centerIn: parent
+                    opacity: 0.5
+                }
+
+                onAccepted: {
+                    if (mainBlock.lockScreenUiVisible) mainBlock.startLogin();
+                }
+
+                Keys.onTabPressed:      loginButton.forceActiveFocus()
+                Keys.onBacktabPressed:  loginButton.forceActiveFocus()
+
+                Connections {
+                    target: root
+                    function onClearPassword() {
+                        passwordField.clear();
+                        passwordField.forceActiveFocus();
+                    }
+                    function onNotificationRepeated() { mainBlock.playHighlightAnimation(); }
                 }
             }
 
-            Item { Layout.fillHeight: true }
-
-            // ── Password field — matches Pixie TextField exactly ───────────
-            // • background: #2D2F27, radius:16, border accent on focus (width:2)
-            // • placeholder "Password" centered (separate Text item, Pixie style)
-            // • cursor color set to accent so it's visible; no fade on focus
-            // • show/hide eye icon on the right
-            // • caps lock indicator icon on the left
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: passwordField.implicitHeight
-
-                TextField {
-                    id: passwordField
-                    anchors.fill: parent
-                    echoMode: TextInput.Password
-                    horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: 18
-                    font.family: mainBlock.pixieFont
-                    color: "white"
-                    rightPadding: mainBlock.capsLockOn ? 40 : 16
-                    leftPadding:  mainBlock.capsLockOn ? 40 : 16
-                    focus: true
-                    enabled: !authenticator.graceLocked
-                    placeholderText: ""
-
-                    text: PasswordSync.password
-
-                    background: Rectangle {
-                        color: "#2D2F27"
-                        radius: 16
-                        border.width: passwordField.activeFocus ? 2 : 0
-                        border.color: mainBlock.accent
-                        // No Behavior on border.width — matches Pixie (instant)
-                    }
-
-                    onAccepted: {
-                        if (mainBlock.lockScreenUiVisible) mainBlock.startLogin();
-                    }
-
-                    Keys.onTabPressed:      loginButton.forceActiveFocus()
-                    Keys.onBacktabPressed:  loginButton.forceActiveFocus()
-
-                    Connections {
-                        target: root
-                        function onClearPassword() {
-                            passwordField.forceActiveFocus();
-                            passwordField.clear();
-                            passwordField.text = Qt.binding(() => PasswordSync.password);
-                        }
-                        function onNotificationRepeated() { mainBlock.playHighlightAnimation(); }
-                    }
-                }
-
-                Binding { target: PasswordSync; property: "password"; value: passwordField.text }
-
-                // Centered placeholder — visible when field is empty and unfocused
-                Text {
-                    anchors.centerIn: parent
-                    text: i18ndc("plasma_shell_org.kde.plasma.desktop",
-                                 "@info:placeholder in text field", "Password")
-                    color: "gray"
-                    font.pixelSize: 16; font.family: mainBlock.pixieFont
-                    horizontalAlignment: Text.AlignHCenter
-                    opacity: 0.5
-                    visible: !passwordField.text && !passwordField.activeFocus
-                    enabled: false
-                }
-
-                // Caps Lock indicator inside the field on the left
-                Item {
-                    anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 12 }
-                    width: 20; height: 20
-                    visible: mainBlock.capsLockOn
-                    Text {
-                        anchors.centerIn: parent
-                        text: "󰘲"
-                        color: mainBlock.accent
-                        font.pixelSize: 16; font.family: mainBlock.pixieFont
-                    }
-                }
+            // ── Num Lock indicator ────────────────────────────────────────
+            Text {
+                id: numLockLabel
+                Layout.alignment: Qt.AlignHCenter
+                text: i18ndc("plasma_shell_org.kde.plasma.desktop",
+                             "@info:status", "Num Lock is on")
+                color: mainBlock.accent
+                font.pixelSize: 14
+                font.family: mainBlock.pixieFont
+                font.weight: Font.Medium
+                visible: mainBlock.numLockOn
+                opacity: visible ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 200 } }
             }
 
             // ── Notification — wrong password / errors ─────────────────────
@@ -327,7 +312,7 @@ Item {
                 visible: authenticator.authenticatorTypes & kind
                 text: label; horizontalAlignment: Text.AlignHCenter
                 Layout.fillWidth: true; font.pixelSize: 13
-                opacity: 0.6; color: "white"; wrapMode: Text.WordWrap
+                opacity: 0.6; color: mainBlock.textColor; wrapMode: Text.WordWrap
                 RejectPasswordAnimation { id: _rej; target: _flab; onFinished: _t.restart() }
                 Connections {
                     target: authenticator
@@ -346,11 +331,8 @@ Item {
                 label: i18ndc("plasma_shell_org.kde.plasma.desktop", "@info:usagetip", "(or scan your smartcard)")
             }
 
-            Item { Layout.fillHeight: true }
-
-            // ── Unlock button — matches Pixie RoundButton exactly ──────────
-            // focusPolicy: Qt.NoFocus (Pixie value)
-            // background color changes instantly (no Behavior) on isLoggingIn
+            // ── Unlock button ────────────────────────────────────────────
+            // No keyboard focus, no Behavior on color/opacity (matches Pixie).
             Item {
                 Layout.fillWidth: true; Layout.preferredHeight: 64
                 Layout.alignment: Qt.AlignHCenter
@@ -359,15 +341,13 @@ Item {
                     id: loginButton
                     width: 64; height: 64; radius: 32
                     anchors.centerIn: parent
-                    // No keyboard focus — matches Pixie focusPolicy: Qt.NoFocus
 
                     color: mainBlock.isLoggingIn
-                           ? "#3D3F37"
+                           ? mainBlock.surfaceVariantColor
                            : (loginArea.containsPress
                               ? Qt.darker(mainBlock.accent, 1.1)
                               : mainBlock.accent)
                     opacity: mainBlock.isLoggingIn ? 0.5 : 1.0
-                    // No Behavior — instant color/opacity change, same as Pixie
 
                     Text {
                         anchors.centerIn: parent
@@ -381,11 +361,14 @@ Item {
                     MouseArea {
                         id: loginArea
                         anchors.fill: parent
+                        enabled: !mainBlock.isLoggingIn
                         cursorShape: Qt.PointingHandCursor
                         onClicked: mainBlock.startLogin()
                     }
                 }
             }
+
+            Item { Layout.fillHeight: true }
         }
     }
 }
